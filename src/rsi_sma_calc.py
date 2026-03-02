@@ -26,7 +26,7 @@ def calculate_rsi_features(prev_table: pd.DataFrame,
                            price_col: str = "Close") -> pd.DataFrame:
     """
     RSI(14) + RSI SMA(14) + cross bilgileri hesaplar.
-    Close kolonunun var olduğu varsayılır.
+    Close kolonunun var olduğu varsayilir.
     """
 
     df = prev_table.copy()
@@ -89,3 +89,51 @@ def calculate_rsi_features(prev_table: pd.DataFrame,
 result = calculate_rsi_features(test_df)
 
 print(result.tail(10))
+
+
+
+
+### Visualization: RSI Chart ###
+
+import matplotlib.pyplot as plt
+
+# RSI gorsellestirmesi
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+
+# Ust grafik: Fiyat
+ax1.plot(result['Date'], result['Close'], 
+         label='Close Price', linewidth=2, color='#1f77b4')
+ax1.set_ylabel('Fiyat', fontsize=11)
+ax1.set_title('Fiyat ve RSI Analizi - TEST', fontsize=14, fontweight='bold')
+ax1.legend(loc='best')
+ax1.grid(True, alpha=0.3, linestyle='--')
+
+# Alt grafik: RSI ve RSI_MA
+ax2.plot(result['Date'], result['RSI'], 
+         label='RSI(14)', linewidth=2, color='#ff7f0e')
+ax2.plot(result['Date'], result['RSI_MA'], 
+         label='RSI_MA(14)', linewidth=2, color='#2ca02c', linestyle='--')
+
+# Asiri alim/satım cizgileri
+ax2.axhline(y=70, color='red', linestyle=':', linewidth=1.5, alpha=0.7, label='Asiri Alim (70)')
+ax2.axhline(y=30, color='green', linestyle=':', linewidth=1.5, alpha=0.7, label='Asiri Satim (30)')
+ax2.axhline(y=50, color='gray', linestyle=':', linewidth=1, alpha=0.5, label='Notr (50)')
+
+# Kesisim noktalarini isaretle
+cross_points = result[result['RSI_Cross_Days'] == 0]
+if len(cross_points) > 0:
+    ax2.scatter(cross_points['Date'], cross_points['RSI'], 
+                color='purple', s=100, zorder=5, marker='o', 
+                label='Kesisim Noktasi', edgecolors='black', linewidths=1.5)
+
+ax2.set_xlabel('Tarih', fontsize=11)
+ax2.set_ylabel('RSI', fontsize=11)
+ax2.set_ylim(0, 100)
+ax2.legend(loc='best', fontsize=9)
+ax2.grid(True, alpha=0.3, linestyle='--')
+
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+print("✅ RSI grafik olusturuldu!")
