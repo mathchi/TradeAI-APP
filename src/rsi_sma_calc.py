@@ -1,139 +1,50 @@
 import pandas as pd
 import numpy as np
+from db_connector import *
 
-# Test verisi oluştur
-np.random.seed(42)
-
-dates = pd.date_range(start="2024-01-01", periods=120)
-
-test_df = pd.DataFrame({
-    "Date": dates,
-    "Close": np.cumsum(np.random.randn(120)) + 100,
-    "Ticker": "TEST"
-})
-
-test_df = test_df.sort_values("Date")
-
-
-
-
-
-# RSI + SMA + Cross hesaplayan fonksiyon
-
-def calculate_rsi_features(prev_table: pd.DataFrame,
+def calculate_rsi_features(df: pd.DataFrame,
                            rsi_length: int = 14,
                            ma_length: int = 14,
-                           price_col: str = "Close") -> pd.DataFrame:
-    """
-    RSI(14) + RSI SMA(14) + cross bilgileri hesaplar.
-    Close kolonunun var olduğu varsayilir.
-    """
+                           price_col: str = "CLOSE") -> pd.DataFrame:
 
-    df = prev_table.copy()
+    def _process_symbol(group: pd.DataFrame) -> pd.DataFrame:
+        g = group.sort_values("TS").reset_index(drop=True).copy()
 
-    # --- 0. Zorunlu kontroller ---
-    required_cols = ["Date", "Ticker", price_col]
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+        delta    = g[price_col].diff()
+        gain     = delta.clip(lower=0)
+        loss     = -delta.clip(upper=0)
+        avg_gain = gain.ewm(alpha=1/rsi_length, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/rsi_length, adjust=False).mean()
+        rs       = avg_gain / avg_loss
+        g["RSI"]    = 100 - (100 / (1 + rs))
+        g["RSI_MA"] = g["RSI"].rolling(window=ma_length, min_periods=ma_length).mean()
 
-    # --- 1. Temizlik ---
-    df = df.sort_values(["Ticker", "Date"])
-    df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
+        g["RSI_Status"] = (g["RSI"] > g["RSI_MA"]).astype(int)
+        g["RSI_Cross"]  = g["RSI_Status"].diff().fillna(0).astype(int)
 
-    # --- 2. RSI hesapla (Wilder) ---
-    delta = df.groupby("Ticker")[price_col].diff()
+        last_cross_pos = None
+        days_since = []
 
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+        for pos, row in g.iterrows():
+            if row["RSI_Cross"] == 1:
+                last_cross_pos = pos
+            if row["RSI_Status"] == 0 or last_cross_pos is None:
+                days_since.append(0)
+            else:
+                days_since.append(pos - last_cross_pos)
 
-    avg_gain = gain.groupby(df["Ticker"]).transform(
-        lambda x: x.ewm(alpha=1/rsi_length, adjust=False).mean()
-    )
-    avg_loss = loss.groupby(df["Ticker"]).transform(
-        lambda x: x.ewm(alpha=1/rsi_length, adjust=False).mean()
-    )
+        g["RSI_Cross_Days_Ago"] = days_since
+        return g
 
-    rs = avg_gain / avg_loss
-    df["RSI"] = 100 - (100 / (1 + rs))
-
-    # --- 3. RSI based MA (SMA) ---
-    df["RSI_MA"] = (
-        df.groupby("Ticker")["RSI"]
-        .transform(lambda x: x.rolling(window=ma_length, min_periods=ma_length).mean())
-    )
-
-    # --- 4. Cross yakala ---
-    cross = (
-        (df["RSI"] > df["RSI_MA"]) &
-        (df["RSI"].shift(1) <= df["RSI_MA"].shift(1))
-    )
-    df["RSI_Cross"] = cross
-
-    # --- 5. Son cross'tan bu yana gün ---
-    df["Cross_Index"] = np.where(df["RSI_Cross"], df.index, np.nan)
-    df["Cross_Index"] = df.groupby("Ticker")["Cross_Index"].ffill()
-    df["RSI_Cross_Days_Ago"] = (df.index - df["Cross_Index"]).fillna(-1).astype(int)
-
-    # --- 6. Senin ana göstergen ---
-    df["RSI_Above_SMA"] = (df["RSI"] > df["RSI_MA"]).astype(int)
-
-    df = df.drop(columns=["Cross_Index"])
-
-    return df
+    result = df.groupby("SYMBOL", group_keys=False).apply(_process_symbol)
+    return result[result["RSI_Cross_Days_Ago"].between(1, 20)]
 
 
+# Veri okuma
+df = fn_read_data_cloud("bronze", "bist_daily_high_filtered")
 
+# Hesaplama
+df_result = calculate_rsi_features(df)
 
-# Output test
-result = calculate_rsi_features(test_df)
-
-print(result.tail(10))
-
-
-
-
-### Visualization: RSI Chart ###
-
-import matplotlib.pyplot as plt
-
-# RSI gorsellestirmesi
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
-
-# Ust grafik: Fiyat
-ax1.plot(result['Date'], result['Close'], 
-         label='Close Price', linewidth=2, color='#1f77b4')
-ax1.set_ylabel('Fiyat', fontsize=11)
-ax1.set_title('Fiyat ve RSI Analizi - TEST', fontsize=14, fontweight='bold')
-ax1.legend(loc='best')
-ax1.grid(True, alpha=0.3, linestyle='--')
-
-# Alt grafik: RSI ve RSI_MA
-ax2.plot(result['Date'], result['RSI'], 
-         label='RSI(14)', linewidth=2, color='#ff7f0e')
-ax2.plot(result['Date'], result['RSI_MA'], 
-         label='RSI_MA(14)', linewidth=2, color='#2ca02c', linestyle='--')
-
-# Asiri alim/satım cizgileri
-ax2.axhline(y=70, color='red', linestyle=':', linewidth=1.5, alpha=0.7, label='Asiri Alim (70)')
-ax2.axhline(y=30, color='green', linestyle=':', linewidth=1.5, alpha=0.7, label='Asiri Satim (30)')
-ax2.axhline(y=50, color='gray', linestyle=':', linewidth=1, alpha=0.5, label='Notr (50)')
-
-# Kesisim noktalarini isaretle
-cross_points = result[result['RSI_Cross_Days'] == 0]
-if len(cross_points) > 0:
-    ax2.scatter(cross_points['Date'], cross_points['RSI'], 
-                color='purple', s=100, zorder=5, marker='o', 
-                label='Kesisim Noktasi', edgecolors='black', linewidths=1.5)
-
-ax2.set_xlabel('Tarih', fontsize=11)
-ax2.set_ylabel('RSI', fontsize=11)
-ax2.set_ylim(0, 100)
-ax2.legend(loc='best', fontsize=9)
-ax2.grid(True, alpha=0.3, linestyle='--')
-
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
-
-print("✅ RSI grafik olusturuldu!")
+# Kontrol
+print(df_result[["SYMBOL", "TS", "CLOSE", "RSI", "RSI_MA", "RSI_Cross", "RSI_Cross_Days_Ago"]].tail(20))
