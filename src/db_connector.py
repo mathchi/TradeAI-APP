@@ -8,8 +8,8 @@ import re
 def cloud_connection():
     url = URL.create(
     "postgresql+psycopg2",
-    username="irfan_admin",
-    password="TradeAPP_IA_2026@",
+    username="user_mali",
+    password="mali@2026",
     host="95.216.148.216",
     port=5432,
     database="trade_app",

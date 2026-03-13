@@ -21,7 +21,7 @@ def calculate_ema_cross(df: pd.DataFrame, price_col: str = "CLOSE") -> pd.DataFr
     """
 
     def _process_symbol(group: pd.DataFrame) -> pd.DataFrame:
-        g = group.sort_values("TS").reset_index(drop=True).copy()
+        g = group.sort_values("TIMESTAMP").reset_index(drop=True).copy()
 
         g["EMA5"]       = g[price_col].ewm(span=5,  adjust=False).mean()
         g["EMA20"]      = g[price_col].ewm(span=20, adjust=False).mean()
@@ -46,12 +46,22 @@ def calculate_ema_cross(df: pd.DataFrame, price_col: str = "CLOSE") -> pd.DataFr
     return result[result["DAYS_SINCE_CROSS"].between(0, 20)]
 
 
+
 # Veri okuma
-df = fn_read_data_cloud("bronze", "bist_daily_high_filtered")
+df = fn_read_data_cloud("silver", "bist_focus_2e_indicators_converted_daily")
 
-# Hesaplama
-df_result = calculate_ema_cross(df, price_col="CLOSE")
+symbol = "FZLGY"
+target_date = "2026-02-04"
 
+# Filtreleme
+df_test = df[df["SYMBOL"] == symbol].copy()  # tüm geçmiş
 
-print(df_result[["SYMBOL", "TS", "CLOSE", "EMA5", "EMA20", "EMA_Cross", "DAYS_SINCE_CROSS"]].head(300))
+df_result = calculate_ema_cross(df_test, price_col="CLOSE")
+
+# sonra istediğin tarihe filtrele
+print(
+    df_result[df_result["TIMESTAMP"] == target_date][
+        ["SYMBOL", "TIMESTAMP", "CLOSE", "EMA5", "EMA20", "EMA_Cross", "DAYS_SINCE_CROSS"]
+    ]
+)
 # print(df_result["EMA_Cross"].value_counts())
